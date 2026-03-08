@@ -471,7 +471,59 @@ function updateScStats(data) {
     }).join('');
 }
 
-// ===== Text-to-Speech =====
+// ===== Text-to-Speech (Mobile Compatible) =====
+
+// Cache voices
+let cachedVoices = [];
+let ttsUnlocked = false;
+
+function loadVoices() {
+    if (typeof speechSynthesis === 'undefined') return;
+    cachedVoices = speechSynthesis.getVoices();
+}
+
+if (typeof speechSynthesis !== 'undefined') {
+    loadVoices();
+    speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+// Unlock TTS on first user interaction (required by iOS/Android)
+function unlockTTS() {
+    if (ttsUnlocked || typeof speechSynthesis === 'undefined') return;
+    const utterance = new SpeechSynthesisUtterance('');
+    utterance.volume = 0;
+    utterance.lang = 'ja-JP';
+    speechSynthesis.speak(utterance);
+    ttsUnlocked = true;
+    // Reload voices after unlock (may become available now)
+    setTimeout(loadVoices, 200);
+}
+
+// Attach unlock to common user gestures
+['click', 'touchstart', 'keydown'].forEach(evt => {
+    document.addEventListener(evt, unlockTTS, { once: true });
+});
+
+// iOS Safari workaround: speechSynthesis pauses after ~15s of inactivity
+// Periodically call resume() to keep it alive
+let iosKeepAliveTimer = null;
+
+function startIOSKeepAlive() {
+    if (iosKeepAliveTimer) return;
+    iosKeepAliveTimer = setInterval(() => {
+        if (typeof speechSynthesis !== 'undefined' && speechSynthesis.speaking) {
+            speechSynthesis.resume();
+        }
+    }, 5000);
+}
+
+function stopIOSKeepAlive() {
+    if (iosKeepAliveTimer) {
+        clearInterval(iosKeepAliveTimer);
+        iosKeepAliveTimer = null;
+    }
+}
+
 function queueTTS(data) {
     let ttsText;
 
@@ -488,9 +540,13 @@ function queueTTS(data) {
 
 function processTTSQueue() {
     if (state.ttsSpeaking || state.ttsQueue.length === 0) return;
+    if (typeof speechSynthesis === 'undefined') return;
 
     state.ttsSpeaking = true;
     const text = state.ttsQueue.shift();
+
+    // Cancel any stuck utterances (Android workaround)
+    speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'ja-JP';
@@ -498,30 +554,35 @@ function processTTSQueue() {
     utterance.pitch = 1;
 
     // Try to find a Japanese voice
-    const voices = speechSynthesis.getVoices();
-    const jaVoice = voices.find(v => v.lang.startsWith('ja'));
+    if (cachedVoices.length === 0) loadVoices();
+    const jaVoice = cachedVoices.find(v => v.lang.startsWith('ja'));
     if (jaVoice) {
         utterance.voice = jaVoice;
     }
 
     utterance.onend = () => {
         state.ttsSpeaking = false;
+        stopIOSKeepAlive();
         processTTSQueue();
     };
 
-    utterance.onerror = () => {
+    utterance.onerror = (e) => {
+        // 'interrupted' is expected from cancel(), not a real error
+        if (e.error !== 'interrupted') {
+            console.warn('TTS error:', e.error);
+        }
         state.ttsSpeaking = false;
+        stopIOSKeepAlive();
         processTTSQueue();
     };
 
-    speechSynthesis.speak(utterance);
-}
+    // Start iOS keepalive before speaking
+    startIOSKeepAlive();
 
-// Preload voices
-if (typeof speechSynthesis !== 'undefined') {
-    speechSynthesis.onvoiceschanged = () => {
-        speechSynthesis.getVoices();
-    };
+    // Small delay helps Android process the cancel() above
+    setTimeout(() => {
+        speechSynthesis.speak(utterance);
+    }, 50);
 }
 
 // ===== Utilities =====

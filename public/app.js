@@ -220,6 +220,7 @@ function setupChat() {
     dom.chatInput.addEventListener('input', () => {
         const hasText = dom.chatInput.value.trim().length > 0;
         dom.sendBtn.classList.toggle('ready', hasText);
+        dom.sendBtn.disabled = !hasText;
     });
 
     dom.chatInput.addEventListener('keydown', (e) => {
@@ -343,6 +344,7 @@ function sendMessage() {
 
     dom.chatInput.value = '';
     dom.sendBtn.classList.remove('ready');
+    dom.sendBtn.disabled = true;
 
     // Clear SC selection after sending
     if (state.selectedSC) {

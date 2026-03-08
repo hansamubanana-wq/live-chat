@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="YouTubeライブ風チャットアプリ - リアルタイムコメント＆疑似スーパーチャット">
+  <title>🔴 LIVE チャット</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== ユーザー登録画面 ===== -->
+  <div id="register-screen" class="screen active">
+    <div class="register-container">
+      <div class="register-header">
+        <div class="live-badge-large">
+          <span class="pulse-dot"></span>
+          LIVE
+        </div>
+        <h1>ライブチャットに参加</h1>
+        <p class="subtitle">名前とアイコンを選んでチャットに参加しよう</p>
+      </div>
+
+      <div class="register-form">
+        <div class="form-group">
+          <label for="username-input">表示名</label>
+          <input type="text" id="username-input" placeholder="ニックネームを入力..." maxlength="20" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label>アイコンを選択</label>
+          <div id="icon-grid" class="icon-grid">
+            <!-- Icons populated by JS -->
+          </div>
+        </div>
+
+        <button id="join-btn" class="join-btn" disabled>
+          <span class="btn-text">チャットに参加する</span>
+          <span class="btn-icon">→</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== メインチャット画面 ===== -->
+  <div id="chat-screen" class="screen">
+    <!-- ヘッダー -->
+    <header id="chat-header" class="chat-header">
+      <div class="header-left">
+        <div class="live-badge">
+          <span class="pulse-dot"></span>
+          LIVE
+        </div>
+        <span class="stream-title">ライブチャット</span>
+      </div>
+      <div class="header-right">
+        <div class="viewer-count">
+          <span class="viewer-icon">👁</span>
+          <span id="viewer-count">0</span>
+        </div>
+        <button id="tts-toggle" class="icon-btn tts-on" title="読み上げON/OFF">
+          🔊
+        </button>
+      </div>
+    </header>
+
+    <!-- ピン留めスーパーチャット -->
+    <div id="pinned-sc" class="pinned-sc-container"></div>
+
+    <!-- チャットメッセージ一覧 -->
+    <div id="chat-messages" class="chat-messages"></div>
+
+    <!-- 入力エリア -->
+    <div class="chat-input-area">
+      <div id="sc-selector" class="sc-selector hidden">
+        <div class="sc-selector-header">
+          <span>💰 スーパーチャット金額を選択</span>
+          <button id="sc-close" class="sc-close-btn">✕</button>
+        </div>
+        <div class="sc-tiers">
+          <button class="sc-tier" data-amount="100" data-tier="blue">
+            <span class="sc-amount">¥100</span>
+          </button>
+          <button class="sc-tier" data-amount="500" data-tier="green">
+            <span class="sc-amount">¥500</span>
+          </button>
+          <button class="sc-tier" data-amount="1000" data-tier="yellow">
+            <span class="sc-amount">¥1,000</span>
+          </button>
+          <button class="sc-tier" data-amount="5000" data-tier="orange">
+            <span class="sc-amount">¥5,000</span>
+          </button>
+          <button class="sc-tier" data-amount="10000" data-tier="red">
+            <span class="sc-amount">¥10,000</span>
+          </button>
+          <button class="sc-tier" data-amount="50000" data-tier="rainbow">
+            <span class="sc-amount">¥50,000</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="input-row">
+        <button id="sc-toggle" class="sc-toggle-btn" title="スーパーチャット">
+          💰
+        </button>
+        <div class="input-wrapper" id="input-wrapper">
+          <span id="sc-badge" class="sc-input-badge hidden"></span>
+          <input type="text" id="chat-input" placeholder="メッセージを入力..." maxlength="200" autocomplete="off">
+        </div>
+        <button id="send-btn" class="send-btn" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -6,7 +6,7 @@
 const state = {
     socket: null,
     user: null,
-    selectedIcon: null,
+    selectedIconData: null, // Base64 data URL
     selectedSC: null,
     ttsEnabled: true,
     ttsQueue: [],
@@ -14,23 +14,19 @@ const state = {
     autoScroll: true,
 };
 
-// ===== Constants =====
-const ICONS = [
-    '😀', '😎', '🤩', '🥳', '😺', '🐱',
-    '🐶', '🦊', '🐻', '🐼', '🐸', '🦁',
-    '🐯', '🐨', '🐷', '🐵', '🐰', '🦄',
-    '🐲', '🦅', '🐧', '🐙', '🦋', '🌟',
-    '🔥', '💎', '🎮', '🎵', '🚀', '⚡',
-];
+// ===== Tier Detection =====
+function getTierForAmount(amount) {
+    if (amount >= 10000) return { tier: 'rainbow', color: '#ff4757' };
+    if (amount >= 5000) return { tier: 'red', color: '#ff1744' };
+    if (amount >= 1000) return { tier: 'orange', color: '#ff6d00' };
+    if (amount >= 500) return { tier: 'yellow', color: '#ffd600' };
+    if (amount >= 100) return { tier: 'green', color: '#00c853' };
+    return { tier: 'blue', color: '#1e88e5' };
+}
 
-const SC_TIERS = {
-    100: { tier: 'blue', label: '¥100', color: '#1e88e5' },
-    500: { tier: 'green', label: '¥500', color: '#00c853' },
-    1000: { tier: 'yellow', label: '¥1,000', color: '#ffd600' },
-    5000: { tier: 'orange', label: '¥5,000', color: '#ff6d00' },
-    10000: { tier: 'red', label: '¥10,000', color: '#ff1744' },
-    50000: { tier: 'rainbow', label: '¥50,000', color: '#ff4757' },
-};
+function formatAmount(amount) {
+    return '¥' + amount.toLocaleString('ja-JP');
+}
 
 // Pin durations (ms) per tier
 const PIN_DURATIONS = {
@@ -53,7 +49,9 @@ const dom = {
 
     // Registration
     usernameInput: $('#username-input'),
-    iconGrid: $('#icon-grid'),
+    iconPreview: $('#icon-preview'),
+    iconFileInput: $('#icon-file-input'),
+    iconUploadBtn: $('#icon-upload-btn'),
     joinBtn: $('#join-btn'),
 
     // Chat
@@ -68,30 +66,72 @@ const dom = {
     scClose: $('#sc-close'),
     scBadge: $('#sc-badge'),
     inputWrapper: $('#input-wrapper'),
+    scAmountInput: $('#sc-amount-input'),
+    scConfirmBtn: $('#sc-confirm-btn'),
+
+    // SC Stats
+    scTotalBadge: $('#sc-total-badge'),
+    scTotalAmount: $('#sc-total-amount'),
+    rankingToggle: $('#ranking-toggle'),
+    rankingPanel: $('#ranking-panel'),
+    rankingClose: $('#ranking-close'),
+    rankingList: $('#ranking-list'),
 };
 
 // ===== Initialization =====
 function init() {
-    setupIconGrid();
+    setupIconUpload();
     setupRegistration();
     setupChat();
     connectSocket();
 }
 
-// ===== Icon Grid =====
-function setupIconGrid() {
-    dom.iconGrid.innerHTML = ICONS.map(icon =>
-        `<button class="icon-option" data-icon="${icon}">${icon}</button>`
-    ).join('');
+// ===== Icon Upload =====
+function setupIconUpload() {
+    // Click preview or button to trigger file input
+    dom.iconPreview.addEventListener('click', () => dom.iconFileInput.click());
+    dom.iconUploadBtn.addEventListener('click', () => dom.iconFileInput.click());
 
-    dom.iconGrid.addEventListener('click', (e) => {
-        const btn = e.target.closest('.icon-option');
-        if (!btn) return;
+    dom.iconFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
 
-        $$('.icon-option').forEach(el => el.classList.remove('selected'));
-        btn.classList.add('selected');
-        state.selectedIcon = btn.dataset.icon;
-        checkRegisterReady();
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+            alert('画像ファイルを選択してください');
+            return;
+        }
+
+        // Read and resize
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const img = new Image();
+            img.onload = () => {
+                // Resize to 64x64 to keep data small
+                const canvas = document.createElement('canvas');
+                const size = 64;
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+
+                // Crop to square center
+                const minDim = Math.min(img.width, img.height);
+                const sx = (img.width - minDim) / 2;
+                const sy = (img.height - minDim) / 2;
+                ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+
+                state.selectedIconData = canvas.toDataURL('image/webp', 0.8);
+
+                // Show preview
+                dom.iconPreview.innerHTML = `<img src="${state.selectedIconData}" alt="アイコン">`;
+                dom.iconPreview.classList.add('has-image');
+                dom.iconUploadBtn.textContent = '変更する';
+
+                checkRegisterReady();
+            };
+            img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
     });
 }
 
@@ -112,7 +152,7 @@ function setupRegistration() {
 
 function checkRegisterReady() {
     const name = dom.usernameInput.value.trim();
-    const hasIcon = !!state.selectedIcon;
+    const hasIcon = !!state.selectedIconData;
     const ready = name.length > 0 && hasIcon;
 
     dom.joinBtn.classList.toggle('ready', ready);
@@ -121,9 +161,9 @@ function checkRegisterReady() {
 
 function joinChat() {
     const name = dom.usernameInput.value.trim();
-    if (!name || !state.selectedIcon) return;
+    if (!name || !state.selectedIconData) return;
 
-    state.user = { name, icon: state.selectedIcon };
+    state.user = { name, icon: state.selectedIconData };
 
     // Register with server
     state.socket.emit('register', state.user);
@@ -147,13 +187,13 @@ function connectSocket() {
     state.socket.on('user-joined', (data) => {
         dom.viewerCount.textContent = data.onlineCount;
         if (data.user.id !== state.socket.id) {
-            addSystemMessage(`${data.user.icon} ${data.user.name} が参加しました`);
+            addSystemMessage(data.user.icon, `${data.user.name} が参加しました`);
         }
     });
 
     state.socket.on('user-left', (data) => {
         dom.viewerCount.textContent = data.onlineCount;
-        addSystemMessage(`${data.user.icon} ${data.user.name} が退出しました`);
+        addSystemMessage(data.user.icon, `${data.user.name} が退出しました`);
     });
 
     state.socket.on('user-list', (data) => {
@@ -167,6 +207,10 @@ function connectSocket() {
         if (state.ttsEnabled && data.user.id !== state.socket.id) {
             queueTTS(data);
         }
+    });
+
+    state.socket.on('sc-stats-update', (data) => {
+        updateScStats(data);
     });
 }
 
@@ -195,6 +239,8 @@ function setupChat() {
 
         if (!isHidden) {
             clearSCSelection();
+        } else {
+            dom.scAmountInput.focus();
         }
     });
 
@@ -204,32 +250,20 @@ function setupChat() {
         clearSCSelection();
     });
 
-    // SC tier selection
-    $$('.sc-tier').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const amount = parseInt(btn.dataset.amount);
-            const tier = btn.dataset.tier;
-
-            if (state.selectedSC && state.selectedSC.amount === amount) {
-                // Deselect
-                clearSCSelection();
-                return;
-            }
-
-            $$('.sc-tier').forEach(el => el.classList.remove('selected'));
-            btn.classList.add('selected');
-
-            state.selectedSC = { amount, tier };
-
-            // Show badge in input
-            const scInfo = SC_TIERS[amount];
-            dom.scBadge.textContent = scInfo.label;
-            dom.scBadge.className = `sc-input-badge badge-${tier}`;
-            dom.inputWrapper.classList.add('sc-active');
-
-            dom.chatInput.focus();
-        });
+    // SC amount input
+    dom.scAmountInput.addEventListener('input', () => {
+        const val = parseInt(dom.scAmountInput.value);
+        dom.scConfirmBtn.disabled = !(val >= 1);
     });
+
+    dom.scAmountInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            confirmSCAmount();
+        }
+    });
+
+    dom.scConfirmBtn.addEventListener('click', confirmSCAmount);
 
     // TTS toggle
     dom.ttsToggle.addEventListener('click', () => {
@@ -245,6 +279,17 @@ function setupChat() {
         }
     });
 
+    // Ranking toggle
+    dom.rankingToggle.addEventListener('click', () => {
+        dom.rankingPanel.classList.toggle('hidden');
+        dom.rankingToggle.classList.toggle('active');
+    });
+
+    dom.rankingClose.addEventListener('click', () => {
+        dom.rankingPanel.classList.add('hidden');
+        dom.rankingToggle.classList.remove('active');
+    });
+
     // Auto-scroll detection
     dom.chatMessages.addEventListener('scroll', () => {
         const el = dom.chatMessages;
@@ -253,9 +298,30 @@ function setupChat() {
     });
 }
 
+function confirmSCAmount() {
+    const amount = parseInt(dom.scAmountInput.value);
+    if (!amount || amount < 1) return;
+
+    const tierInfo = getTierForAmount(amount);
+
+    state.selectedSC = { amount, tier: tierInfo.tier };
+
+    // Show badge in input
+    dom.scBadge.textContent = formatAmount(amount);
+    dom.scBadge.className = `sc-input-badge badge-${tierInfo.tier}`;
+    dom.inputWrapper.classList.add('sc-active');
+
+    // Hide selector
+    dom.scSelector.classList.add('hidden');
+    dom.scToggle.classList.remove('active');
+
+    dom.chatInput.focus();
+}
+
 function clearSCSelection() {
     state.selectedSC = null;
-    $$('.sc-tier').forEach(el => el.classList.remove('selected'));
+    dom.scAmountInput.value = '';
+    dom.scConfirmBtn.disabled = true;
     dom.scBadge.className = 'sc-input-badge hidden';
     dom.inputWrapper.classList.remove('sc-active');
 }
@@ -281,16 +347,19 @@ function sendMessage() {
     // Clear SC selection after sending
     if (state.selectedSC) {
         clearSCSelection();
-        dom.scSelector.classList.add('hidden');
-        dom.scToggle.classList.remove('active');
     }
 }
 
 // ===== Message Rendering =====
-function addSystemMessage(text) {
+function renderIcon(iconData, size) {
+    const sizeClass = size === 'small' ? 'icon-sm' : size === 'large' ? 'icon-lg' : '';
+    return `<img src="${escapeAttr(iconData)}" class="user-icon ${sizeClass}" alt="アイコン">`;
+}
+
+function addSystemMessage(iconData, text) {
     const div = document.createElement('div');
     div.className = 'system-message';
-    div.textContent = text;
+    div.innerHTML = `${renderIcon(iconData, 'small')} <span>${escapeHTML(text)}</span>`;
     dom.chatMessages.appendChild(div);
     scrollToBottom();
 }
@@ -305,16 +374,17 @@ function addChatMessage(data) {
     const div = document.createElement('div');
 
     if (superChat) {
-        const scInfo = SC_TIERS[superChat.amount];
-        div.className = `chat-msg sc-message sc-${superChat.tier}`;
+        const tierInfo = getTierForAmount(superChat.amount);
+        const label = formatAmount(superChat.amount);
+        div.className = `chat-msg sc-message sc-${tierInfo.tier}`;
         div.innerHTML = `
-      <div class="msg-icon">${escapeHTML(user.icon)}</div>
+      <div class="msg-icon">${renderIcon(user.icon)}</div>
       <div class="msg-body">
         <div class="msg-header">
           <span class="msg-name">${escapeHTML(user.name)}</span>
           <span class="msg-time">${time}</span>
         </div>
-        <div class="sc-amount-tag">💰 ${scInfo.label}</div>
+        <div class="sc-amount-tag">💰 ${label}</div>
         <div class="msg-text">${escapeHTML(text)}</div>
       </div>
     `;
@@ -324,7 +394,7 @@ function addChatMessage(data) {
     } else {
         div.className = 'chat-msg';
         div.innerHTML = `
-      <div class="msg-icon">${escapeHTML(user.icon)}</div>
+      <div class="msg-icon">${renderIcon(user.icon)}</div>
       <div class="msg-body">
         <div class="msg-header">
           <span class="msg-name">${escapeHTML(user.name)}</span>
@@ -340,16 +410,17 @@ function addChatMessage(data) {
 }
 
 function pinSuperChat(user, text, superChat) {
-    const scInfo = SC_TIERS[superChat.amount];
-    const duration = PIN_DURATIONS[superChat.tier];
+    const tierInfo = getTierForAmount(superChat.amount);
+    const label = formatAmount(superChat.amount);
+    const duration = PIN_DURATIONS[tierInfo.tier];
 
     const pin = document.createElement('div');
-    pin.className = `pinned-sc tier-${superChat.tier}`;
+    pin.className = `pinned-sc tier-${tierInfo.tier}`;
     pin.innerHTML = `
-    <div class="pinned-icon">${escapeHTML(user.icon)}</div>
+    <div class="pinned-icon">${renderIcon(user.icon)}</div>
     <div class="pinned-info">
       <div class="pinned-name">${escapeHTML(user.name)}</div>
-      <div class="pinned-amount">${scInfo.label}</div>
+      <div class="pinned-amount">${label}</div>
       <div class="pinned-text">${escapeHTML(text)}</div>
     </div>
     <div class="pinned-timer" style="animation-duration: ${duration}ms;"></div>
@@ -374,13 +445,37 @@ function scrollToBottom() {
     }
 }
 
+// ===== SC Stats / Ranking =====
+function updateScStats(data) {
+    // Update total
+    dom.scTotalAmount.textContent = formatAmount(data.totalAmount);
+
+    // Update ranking
+    if (data.ranking.length === 0) {
+        dom.rankingList.innerHTML = '<div class="ranking-empty">まだスーパーチャットはありません</div>';
+        return;
+    }
+
+    dom.rankingList.innerHTML = data.ranking.map((entry, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
+        return `
+      <div class="ranking-item ${i < 3 ? 'ranking-top' : ''}">
+        <span class="ranking-pos">${medal}</span>
+        <div class="ranking-user-icon">${renderIcon(entry.icon, 'small')}</div>
+        <span class="ranking-name">${escapeHTML(entry.name)}</span>
+        <span class="ranking-amount">${formatAmount(entry.total)}</span>
+      </div>
+    `;
+    }).join('');
+}
+
 // ===== Text-to-Speech =====
 function queueTTS(data) {
     let ttsText;
 
     if (data.superChat) {
-        const scInfo = SC_TIERS[data.superChat.amount];
-        ttsText = `${data.user.name}さんから${scInfo.label}のスーパーチャット。${data.text}`;
+        const label = formatAmount(data.superChat.amount);
+        ttsText = `${data.user.name}さんから${label}のスーパーチャット。${data.text}`;
     } else {
         ttsText = `${data.user.name}さん。${data.text}`;
     }
@@ -432,6 +527,10 @@ function escapeHTML(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+function escapeAttr(str) {
+    return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ===== Start =====

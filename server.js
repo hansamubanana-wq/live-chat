@@ -15,6 +15,25 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Connected users
 const users = new Map();
 
+// Super Chat stats
+const scStats = {
+  totalAmount: 0,
+  userTotals: new Map(), // name -> { name, icon, total }
+};
+
+function getScRanking() {
+  return Array.from(scStats.userTotals.values())
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+}
+
+function broadcastScStats() {
+  io.emit('sc-stats-update', {
+    totalAmount: scStats.totalAmount,
+    ranking: getScRanking(),
+  });
+}
+
 io.on('connection', (socket) => {
   console.log(`[接続] ${socket.id}`);
 
@@ -39,8 +58,14 @@ io.on('connection', (socket) => {
       users: Array.from(users.values()),
       onlineCount: users.size
     });
+
+    // Send current SC stats to the new user
+    socket.emit('sc-stats-update', {
+      totalAmount: scStats.totalAmount,
+      ranking: getScRanking(),
+    });
     
-    console.log(`[登録] ${user.icon} ${user.name}`);
+    console.log(`[登録] ${user.name}`);
   });
 
   // Chat message
@@ -57,7 +82,28 @@ io.on('connection', (socket) => {
     };
 
     io.emit('chat-message', message);
-    console.log(`[メッセージ] ${user.icon} ${user.name}: ${data.text}${data.superChat ? ` (SC ¥${data.superChat.amount})` : ''}`);
+
+    // Update SC stats if super chat
+    if (data.superChat && data.superChat.amount > 0) {
+      const amount = data.superChat.amount;
+      scStats.totalAmount += amount;
+
+      const existing = scStats.userTotals.get(user.name);
+      if (existing) {
+        existing.total += amount;
+        existing.icon = user.icon; // Update icon in case it changed
+      } else {
+        scStats.userTotals.set(user.name, {
+          name: user.name,
+          icon: user.icon,
+          total: amount,
+        });
+      }
+
+      broadcastScStats();
+    }
+
+    console.log(`[メッセージ] ${user.name}: ${data.text}${data.superChat ? ` (SC ¥${data.superChat.amount})` : ''}`);
   });
 
   // Disconnect
@@ -69,7 +115,7 @@ io.on('connection', (socket) => {
         user,
         onlineCount: users.size
       });
-      console.log(`[退出] ${user.icon} ${user.name}`);
+      console.log(`[退出] ${user.name}`);
     }
   });
 });
